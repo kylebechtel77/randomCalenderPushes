@@ -1,12 +1,39 @@
+//todo:: error handling? what error handling? :) 
+// check that we arent already doing something that day. 
+
 var fs = require('fs');
 var readline = require('readline');
 var google = require('googleapis');
 var googleAuth = require('google-auth-library');
+var moment = require('moment');
+var Forecast = require('forecast');
+ 
+// Initialize 
+var forecast = new Forecast({
+  service: 'darksky',
+  key: '828081a4df46847dbbf4347085c6a35b',
+  units: 'celcius',
+  cache: true,      // Cache API requests 
+  ttl: {            // How long to cache requests. Uses syntax from moment.js: http://momentjs.com/docs/#/durations/creating/ 
+    minutes: 27,
+    seconds: 45
+  }
+});
 
-function getAuth(){
-
+function getRainChance(day, callback){
+	forecast.get([ 33.95, -84.55], function(err, weather) {
+	  if(err) return console.dir(err);
+	  var weatherForTheDay;
+	  for(var i = 0; i< weather.daily.data.length; i++){
+		  if(moment(weather.daily.data[i].time * 1000).day() == day){
+			  weatherForTheDay = weather.daily.data[i];
+		  }
+	  }
+	  return callback(weatherForTheDay.precipProbability);
+	  
+	});
 }
-
+	
 // If modifying these scopes, delete your previously saved credentials
 // at ~/.credentials/calendar-nodejs-quickstart.json
 var SCOPES = ['https://www.googleapis.com/auth/calendar'];
@@ -132,16 +159,65 @@ function listEvents(auth) {
   });
 }
 
+//this should be run two days before the week starts, prefere ably at 6pm. 
 function getRandomDateNextWeek(callback){
-
+	var today = moment();
+	var start = moment(today).add(getRandomInt(0,8), 'day');
+	var end = moment(start).add(1, 'hour');
+	start = moment(start).format('YYYY-MM-DD HH:mm:ss').replace(' ', 'T');
+	end = moment(end).format('YYYY-MM-DD HH:mm:ss').replace(' ', 'T');
+	isWeekend = moment(start).day() == 6 || moment(start).day()== 0;
+	return {
+		end: end,
+		start: start,
+		isWeekend: isWeekend
+	}
 }
 
-function getRandomEvent(date, callback){
+function checkWeather(events, day, callback){
+//todo: implement
+	var weather = "outside";
+	getRainChance(day, function(rainchance){
+		if(rainchance < .4){
+			return callback(events);
+		} else {
+			var e = [];
+			foreach(var event in events){
+				if(event.type == "inside"){
+					e.push(event);
+				}
+			}
+			return callback(e);
+		}
+	}
+}
+
+function checkEventTypeMatchesDay(events, isWeekend){
+	//we can do nonweekend events on the weekend.
+	if(isWeekend){
+		return events;
+	}
+	
+	//we cant do weekend events during the week.
+	var e = [];
+	foreach(var event in events){
+		if(!event.weekendEvent){
+			e.push(event);
+		}
+	}
+	return e;
+}
+
+function getRandomEvent(callback){
+  var date = getRandomDateNextWeek();
   fs.readFile("./todo.json", function(err, arrayOfTodos) {
     if (err) {
       return console.log(error);
     } else {
       arrayOfTodos = JSON.parse(arrayOfTodos);
+	  checkWeather(arrayOfTodos, date.getDay(), function(weatherSensitiveEvents) {
+	  curratedEvents = checkEventTypeMatchesDay(weatherSensitiveEvents, date.isWeekend);
+	  
       var event = {
         'summary': arrayOfTodos[getRandomInt(0, arrayOfTodos.length)],
         'location': '',
@@ -156,54 +232,25 @@ function getRandomEvent(date, callback){
         }
       };
       callback(oauth2Client, event);
-    }
+    })
+	}
   });
 }
 
-// // insert event code
-// var e = {
-//   'summary': 'Google I/O 2017',
-//   'location': '800 Howard St., San Francisco, CA 94103',
-//   'description': 'A chance to hear more about Google\'s developer products.',
-//   'start': {
-//     'dateTime': '2017-01-28T09:00:00-07:00',
-//     'timeZone': 'America/Los_Angeles',
-//   },
-//   'end': {
-//     'dateTime': '2017-01-28T17:00:00-07:00',
-//     'timeZone': 'America/Los_Angeles',
-//   },
-//   'recurrence': [
-//     //'RRULE:FREQ=DAILY;COUNT=2'
-//   ],
-//   'attendees': [
-//     //{'email': 'lpage@example.com'},
-//     //{'email': 'sbrin@example.com'},
-//   ],
-//   'reminders': {
-//     'useDefault': true,
-//     'overrides': [
-//       //{'method': 'email', 'minutes': 24 * 60},
-//       //{'method': 'popup', 'minutes': 10},
-//     ],
-//   },
-// };
-
-function insertEvent(auth, event){
-  if(!event){
-    event = e;
-  }
-  var calendar = google.calendar('v3');
-  calendar.events.insert({
-    auth: auth,
-    calendarId: 'primary',
-    resource: event,
-  }, function(err, event) {
-    if (err) {
-      console.log('There was an error contacting the Calendar service: ' + err);
-      return;
-    }
-    console.log('Event created: %s', event.htmlLink);
+function insertEvent(auth){
+  getRandomEvent(function(event) {
+	  var calendar = google.calendar('v3');
+	  calendar.events.insert({
+		auth: auth,
+		calendarId: 'primary',
+		resource: event,
+	  }, function(err, event) {
+		if (err) {
+		  console.log('There was an error contacting the Calendar service: ' + err);
+		  return;
+		}
+		console.log('Event created: %s', event.htmlLink);
+	  });
   });
 }
 
