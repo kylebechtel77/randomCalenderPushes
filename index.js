@@ -1,5 +1,6 @@
-//todo:: error handling? what error handling? :) 
-// check that we arent already doing something that day. 
+//todo:: error handling? what error handling? :)
+//make more modular and clean up code
+// check that we arent already doing something that day.
 
 var fs = require('fs');
 var readline = require('readline');
@@ -7,14 +8,14 @@ var google = require('googleapis');
 var googleAuth = require('google-auth-library');
 var moment = require('moment');
 var Forecast = require('forecast');
- 
-// Initialize 
+
+// Initialize
 var forecast = new Forecast({
   service: 'darksky',
   key: '828081a4df46847dbbf4347085c6a35b',
   units: 'celcius',
-  cache: true,      // Cache API requests 
-  ttl: {            // How long to cache requests. Uses syntax from moment.js: http://momentjs.com/docs/#/durations/creating/ 
+  cache: true,      // Cache API requests
+  ttl: {            // How long to cache requests. Uses syntax from moment.js: http://momentjs.com/docs/#/durations/creating/
     minutes: 27,
     seconds: 45
   }
@@ -30,10 +31,10 @@ function getRainChance(day, callback){
 		  }
 	  }
 	  return callback(weatherForTheDay.precipProbability);
-	  
+
 	});
 }
-	
+
 // If modifying these scopes, delete your previously saved credentials
 // at ~/.credentials/calendar-nodejs-quickstart.json
 var SCOPES = ['https://www.googleapis.com/auth/calendar'];
@@ -131,7 +132,7 @@ function storeToken(token) {
  *
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
-function listEvents(auth) {
+function listEvents(auth, callback) {
   var calendar = google.calendar('v3');
   calendar.events.list({
     auth: auth,
@@ -148,18 +149,24 @@ function listEvents(auth) {
     var events = response.items;
     if (events.length == 0) {
       console.log('No upcoming events found.');
+      return callback([]);
     } else {
-      console.log('Upcoming 10 events:');
+      //get upcoming event days that fall into the next 7 days
+      var eventDays = [];
+      var today = moment();
       for (var i = 0; i < events.length; i++) {
         var event = events[i];
         var start = event.start.dateTime || event.start.date;
-        console.log('%s - %s', start, event.summary);
+        if(!moment(start).isAfter(moment(today).add(7), 'day')){
+          eventDays.push(moment(start).day());
+        }
       }
+      callback(eventDays);
     }
   });
 }
 
-//this should be run two days before the week starts, prefere ably at 6pm. 
+//this should be run two days before the week starts, prefere ably at 6pm.
 function getRandomDateNextWeek(callback){
 	var today = moment();
 	var start = moment(today).add(getRandomInt(0,8), 'day');
@@ -170,75 +177,93 @@ function getRandomDateNextWeek(callback){
 	return {
 		end: end,
 		start: start,
-		isWeekend: isWeekend
+		isWeekend: isWeekend,
+    day:moment(start).day()
 	}
 }
 
 function checkWeather(events, day, callback){
-//todo: implement
 	var weather = "outside";
 	getRainChance(day, function(rainchance){
 		if(rainchance < .4){
 			return callback(events);
 		} else {
-			var e = [];
-			foreach(var event in events){
-				if(event.type == "inside"){
-					e.push(event);
-				}
-			}
-			return callback(e);
-		}
+			   var e = [];
+  			 for(var i = 0; i<events.length; i++){
+    				if(events[i].type == "inside"){
+    					e.push(events[i]);
+    				}
+          };
+    			return callback(e);
+      }
+		})
 	}
-}
+
 
 function checkEventTypeMatchesDay(events, isWeekend){
 	//we can do nonweekend events on the weekend.
 	if(isWeekend){
 		return events;
 	}
-	
+
 	//we cant do weekend events during the week.
 	var e = [];
-	foreach(var event in events){
-		if(!event.weekendEvent){
-			e.push(event);
+	for(var i = 0; i< events.length; i++){
+		if(!events[i].weekendEvent){
+			e.push(events[i]);
 		}
 	}
 	return e;
 }
 
-function getRandomEvent(callback){
-  var date = getRandomDateNextWeek();
-  fs.readFile("./todo.json", function(err, arrayOfTodos) {
-    if (err) {
-      return console.log(error);
-    } else {
-      arrayOfTodos = JSON.parse(arrayOfTodos);
-	  checkWeather(arrayOfTodos, date.getDay(), function(weatherSensitiveEvents) {
-	  curratedEvents = checkEventTypeMatchesDay(weatherSensitiveEvents, date.isWeekend);
-	  
-      var event = {
-        'summary': arrayOfTodos[getRandomInt(0, arrayOfTodos.length)],
-        'location': '',
-        'description': 'A chance to hear more about Google\'s developer products.',
-        'start': {
-          'dateTime': date.start,
-          'timeZone': 'America/Los_Angeles',
-        },
-        'end': {
-          'dateTime': date.end,//'2017-01-28T17:00:00-07:00',
-          'timeZone': 'America/Los_Angeles',
+function getRandomEvent(auth, callback){
+  listEvents(auth, function(currentEvents){
+      var date = getRandomDateNextWeek();
+      var badDate = true;
+      var counter = 0;
+      while(badDate){
+        if(counter > 10){
+          //I would rather us see something fun to do
+          // than not.
+          badDate = false;
         }
-      };
-      callback(oauth2Client, event);
-    })
-	}
-  });
+        if(currentEvents.includes(date.day)){
+          date = getRandomDateNextWeek();
+        } else {
+          badDate = false;
+        }
+      }
+    fs.readFile("./todo.json", function(err, arrayOfTodos) {
+      if (err) {
+        return console.log(error);
+      } else {
+        arrayOfTodos = JSON.parse(arrayOfTodos);
+  	  checkWeather(arrayOfTodos, date.day, function(weatherSensitiveEvents) {
+  	  curratedEvents = checkEventTypeMatchesDay(weatherSensitiveEvents, date.isWeekend);
+
+        var event = {
+          'summary': arrayOfTodos[getRandomInt(0, arrayOfTodos.length)].title,
+          'location': '',
+          'description': 'A chance to hear more about Google\'s developer products.',
+          'start': {
+            'dateTime': date.start,
+            'timeZone': 'America/Los_Angeles',
+          },
+          'end': {
+            'dateTime': date.end,//'2017-01-28T17:00:00-07:00',
+            'timeZone': 'America/Los_Angeles',
+          }
+        };
+        callback(event);
+      })
+  	}
+    });
+})
+
 }
 
 function insertEvent(auth){
-  getRandomEvent(function(event) {
+  getRandomEvent(auth, function(event) {
 	  var calendar = google.calendar('v3');
 	  calendar.events.insert({
 		auth: auth,
