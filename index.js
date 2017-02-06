@@ -183,7 +183,6 @@ function getRandomDateNextWeek(callback){
 }
 
 function checkWeather(events, day, callback){
-	var weather = "outside";
 	getRainChance(day, function(rainchance){
 		if(rainchance < .4){
 			return callback(events);
